@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title data-i18n="profile_title">Профиль пользователя</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 30px;
+        }
+        h2, h3 {
+            color: #333;
+        }
+        .excursion {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        img {
+            max-width: 200px;
+            display: block;
+            margin-top: 5px;
+        }
+        button {
+            margin-top: 5px;
+        }
+        #langSelect {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <select id="langSelect">
+        <option value="ru">Русский</option>
+        <option value="en">English</option>
+    </select>
+
+    <h2 data-i18n="profile">Профиль</h2>
+    <p><b data-i18n="name">Имя:</b> <span id="fullName"></span></p>
+    <p><b data-i18n="created">Создан:</b> <span id="createdAt"></span></p>
+    <button onclick="goToMain()" data-i18n="to_main">На главную</button>
+    <button onclick="logout()" data-i18n="logout">Выйти</button>
+
+    <h3 data-i18n="my_excursions">Мои экскурсии</h3>
+    <div id="excursionList" data-i18n="loading">Загрузка...</div>
+
+    <script>
+        const token = localStorage.getItem("token");
+        if (!token) {
+            alert("Вы не авторизованы.");
+            location.href = "login.html";
+        }
+
+        function goToMain() {
+            window.location.href = "map.html";
+        }
+
+        function logout() {
+            localStorage.removeItem("token");
+            location.href = "login.html";
+        }
+
+        fetch("http://localhost:8000/me", {
+            headers: { Authorization: "Bearer " + token }
+        })
+        .then(res => res.json())
+        .then(user => {
+            document.getElementById("fullName").textContent = user.full_name || user.login;
+            const created = new Date(user.created_at);
+            document.getElementById("createdAt").textContent = created.toLocaleString(getLang() === "ru" ? "ru-RU" : "en-US", {
+                day: "numeric", month: "long", year: "numeric",
+                hour: "2-digit", minute: "2-digit"
+            });
+        });
+
+        fetch("http://localhost:8000/my/excursions", {
+            headers: { Authorization: "Bearer " + token }
+        })
+        .then(res => res.json())
+        .then(excursions => {
+            const list = document.getElementById("excursionList");
+            list.innerHTML = "";
+
+            excursions.forEach(e => {
+                const div = document.createElement("div");
+                div.className = "excursion";
+                div.innerHTML = `
+                    <b>${e.title}</b> (${e.status})<br>
+                    ${e.description || t("no_description")}<br>
+                    ${e.image_url ? `<img src="http://localhost:8000${e.image_url}">` : ""}<br>
+                    <button onclick="editExcursion(${e.id})">${t("edit")}</button>
+                    <button onclick="submitExcursion(${e.id})">${t("submit")}</button>
+                `;
+                list.appendChild(div);
+            });
+        });
+
+        function editExcursion(id) {
+            window.location.href = `edit.html?id=${id}`;
+        }
+
+        function submitExcursion(id) {
+            fetch(`http://localhost:8000/excursions/${id}/submit`, {
+                method: "POST",
+                headers: { Authorization: "Bearer " + token }
+            }).then(() => location.reload());
+        }
+
+        // --- i18n ---
+        const translations = {
+            ru: {
+                "profile": "Профиль",
+                "name": "Имя:",
+                "created": "Создан:",
+                "to_main": "На главную",
+                "logout": "Выйти",
+                "my_excursions": "Мои экскурсии",
+                "loading": "Загрузка...",
+                "no_description": "Без описания",
+                "edit": "Редактировать",
+                "submit": "Отправить на модерацию",
+                "profile_title": "Профиль пользователя"
+            },
+            en: {
+                "profile": "Profile",
+                "name": "Name:",
+                "created": "Created:",
+                "to_main": "To main",
+                "logout": "Logout",
+                "my_excursions": "My excursions",
+                "loading": "Loading...",
+                "no_description": "No description",
+                "edit": "Edit",
+                "submit": "Submit for review",
+                "profile_title": "User Profile"
+            }
+        };
+
+        function getLang() {
+            return localStorage.getItem("lang") || "ru";
+        }
+
+        function t(key) {
+            const lang = getLang();
+            return translations[lang][key] || key;
+        }
+
+        function applyTranslations() {
+            document.querySelectorAll("[data-i18n]").forEach(el => {
+                const key = el.getAttribute("data-i18n");
+                el.textContent = t(key);
+            });
+        }
+
+        const langSelect = document.getElementById("langSelect");
+        langSelect.value = getLang();
+
+        langSelect.addEventListener("change", () => {
+            localStorage.setItem("lang", langSelect.value);
+            location.reload();
+        });
+
+        applyTranslations();
+    </script>
+</body>
+</html>

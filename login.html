@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Авторизация / Регистрация</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 400px;
+            margin: 50px auto;
+        }
+        input, button {
+            display: block;
+            width: 100%;
+            margin-bottom: 10px;
+            padding: 8px;
+            font-size: 14px;
+        }
+        h2 {
+            margin-top: 30px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Вход</h1>
+    <input type="text" id="loginInput" placeholder="Логин" />
+    <input type="password" id="passwordInput" placeholder="Пароль" />
+    <button onclick="login()">Войти</button>
+
+    <h2>Регистрация</h2>
+    <input type="text" id="regLoginInput" placeholder="Логин" />
+    <input type="password" id="regPasswordInput" placeholder="Пароль" />
+    <input type="text" id="regFullNameInput" placeholder="Имя (необязательно)" />
+    <button onclick="register()">Зарегистрироваться</button>
+
+    <p id="message" style="color: red;"></p>
+
+    <script>
+        const apiBase = "http://localhost:8000";
+
+        function login() {
+            const login = document.getElementById("loginInput").value;
+            const password = document.getElementById("passwordInput").value;
+
+            const formData = new URLSearchParams();
+            formData.append("username", login);
+            formData.append("password", password);
+
+            fetch(`${apiBase}/login`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.access_token) {
+                    localStorage.setItem("token", data.access_token);
+
+                    // Проверим роль пользователя
+                    fetch(`${apiBase}/me`, {
+                        headers: {
+                            Authorization: "Bearer " + data.access_token
+                        }
+                    })
+                    .then(res => res.json())
+                    .then(user => {
+                        if (user.role === "admin") {
+                            window.location.href = "admin.html";
+                        } else {
+                            window.location.href = "map.html";
+                        }
+                    });
+                } else {
+                    showMessage("Неверный логин или пароль");
+                }
+            });
+        }
+
+        function register() {
+            const login = document.getElementById("regLoginInput").value;
+            const password = document.getElementById("regPasswordInput").value;
+            const fullName = document.getElementById("regFullNameInput").value;
+
+            fetch(`${apiBase}/register`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    login: login,
+                    password: password,
+                    full_name: fullName
+                })
+            })
+            .then(res => {
+                if (res.ok) {
+                    showMessage("Успешно зарегистрирован. Теперь войдите.", "green");
+                } else {
+                    res.json().then(d => showMessage(d.detail || "Ошибка регистрации"));
+                }
+            });
+        }
+
+        function showMessage(text, color = "red") {
+            const msg = document.getElementById("message");
+            msg.textContent = text;
+            msg.style.color = color;
+        }
+    </script>
+</body>
+</html>

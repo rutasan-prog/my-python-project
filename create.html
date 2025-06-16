@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title data-i18n="create_title">Создание экскурсии</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+
+    <style>
+        body { margin: 0; font-family: sans-serif; }
+        nav { background: #0077cc; text-align: center; padding: 10px; }
+        nav a { color: white; text-decoration: none; margin: 0 15px; font-size: 16px; }
+        #controls { padding: 10px; text-align: center; }
+        #map { height: 65vh; width: 70%; margin: 10px auto 0; }
+        input, textarea { margin: 5px; padding: 8px; width: 250px; }
+        #pointForm { display: none; padding: 10px; background: #f0f0f0; text-align: center; }
+        .leaflet-control-attribution { display: none !important; }
+        #langSelect { position: absolute; top: 10px; right: 10px; }
+    </style>
+</head>
+<body>
+<nav>
+    <a href="map.html" data-i18n="to_main">На главную</a>
+    <a href="#" onclick="logout()" data-i18n="logout">Выйти</a>
+    <select id="langSelect">
+        <option value="ru">Русский</option>
+        <option value="en">English</option>
+    </select>
+</nav>
+
+<div id="controls">
+    <input type="text" id="excursionTitle" placeholder="Название экскурсии" data-i18n-placeholder="excursion_title_placeholder" />
+    <textarea id="excursionDescription" placeholder="Описание экскурсии" data-i18n-placeholder="excursion_desc_placeholder"></textarea><br>
+    <input type="file" id="excursionImage" accept="image/*" /><br>
+    <button onclick="saveExcursion()" data-i18n="save_excursion">💾 Сохранить экскурсию</button>
+</div>
+
+<div id="map"></div>
+
+<div id="pointForm">
+    <h3 data-i18n="add_point">Добавление точки</h3>
+    <input type="text" id="pointName" placeholder="Название точки" data-i18n-placeholder="point_name_placeholder" /><br>
+    <textarea id="pointDesc" placeholder="Описание точки" data-i18n-placeholder="point_desc_placeholder"></textarea><br>
+    <input type="file" id="pointImage" accept="image/*" /><br>
+    <button onclick="confirmPoint()" data-i18n="add_point_btn">Добавить точку</button>
+</div>
+
+<script>
+    const translations = {
+        ru: {
+            create_title: "Создание экскурсии",
+            to_main: "На главную",
+            logout: "Выйти",
+            excursion_title_placeholder: "Название экскурсии",
+            excursion_desc_placeholder: "Описание экскурсии",
+            save_excursion: "💾 Сохранить экскурсию",
+            add_point: "Добавление точки",
+            point_name_placeholder: "Название точки",
+            point_desc_placeholder: "Описание точки",
+            add_point_btn: "Добавить точку"
+        },
+        en: {
+            create_title: "Create Excursion",
+            to_main: "Home",
+            logout: "Logout",
+            excursion_title_placeholder: "Excursion title",
+            excursion_desc_placeholder: "Excursion description",
+            save_excursion: "💾 Save Excursion",
+            add_point: "Add Point",
+            point_name_placeholder: "Point name",
+            point_desc_placeholder: "Point description",
+            add_point_btn: "Add point"
+        }
+    };
+
+    function getLang() {
+        return localStorage.getItem("lang") || "ru";
+    }
+
+    function t(key) {
+        const lang = getLang();
+        return translations[lang][key] || key;
+    }
+
+    function applyTranslations() {
+        document.querySelectorAll("[data-i18n]").forEach(el => {
+            const key = el.getAttribute("data-i18n");
+            el.textContent = t(key);
+        });
+        document.querySelectorAll("[data-i18n-placeholder]").forEach(el => {
+            const key = el.getAttribute("data-i18n-placeholder");
+            el.placeholder = t(key);
+        });
+    }
+
+    const langSelect = document.getElementById("langSelect");
+    langSelect.value = getLang();
+    langSelect.addEventListener("change", () => {
+        localStorage.setItem("lang", langSelect.value);
+        location.reload();
+    });
+    applyTranslations();
+
+    const token = localStorage.getItem("token");
+    if (!token) {
+        alert("Вы не авторизованы");
+        window.location.href = "login.html";
+    }
+
+    function logout() {
+        localStorage.removeItem("token");
+        window.location.href = "login.html";
+    }
+
+    let map = L.map('map').setView([46.3497, 48.0408], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 18
+    }).addTo(map);
+
+    let points = [];
+    let tempLatLng = null;
+
+    map.on('click', e => {
+        tempLatLng = e.latlng;
+        document.getElementById("pointForm").style.display = "block";
+    });
+
+    function confirmPoint() {
+        const name = document.getElementById("pointName").value;
+        const description = document.getElementById("pointDesc").value;
+        const image = document.getElementById("pointImage").files[0];
+
+        if (!name || !tempLatLng) {
+            alert(t("point_name_placeholder"));
+            return;
+        }
+
+        L.marker([tempLatLng.lat, tempLatLng.lng]).addTo(map).bindPopup(`<b>${name}</b><br>${description || ''}`);
+        points.push({ name, description, latitude: tempLatLng.lat, longitude: tempLatLng.lng, image });
+
+        document.getElementById("pointName").value = "";
+        document.getElementById("pointDesc").value = "";
+        document.getElementById("pointImage").value = null;
+        document.getElementById("pointForm").style.display = "none";
+        tempLatLng = null;
+    }
+
+    async function saveExcursion() {
+        const title = document.getElementById("excursionTitle").value;
+        const description = document.getElementById("excursionDescription").value;
+        const image = document.getElementById("excursionImage").files[0];
+
+        if (!title || points.length === 0) {
+            alert(t("excursion_title_placeholder"));
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append("title", title);
+        formData.append("description", description);
+        if (image) formData.append("image", image);
+
+        formData.append("points", JSON.stringify(points.map((p, i) => ({
+            name: p.name,
+            description: p.description,
+            latitude: p.latitude,
+            longitude: p.longitude,
+            order_index: i
+        }))));
+
+        points.forEach(p => {
+            if (p.image) {
+                formData.append("files", p.image);
+            }
+        });
+
+        const res = await fetch("http://localhost:8000/excursions/create-full", {
+            method: "POST",
+            headers: { Authorization: "Bearer " + token },
+            body: formData
+        });
+
+        if (res.ok) {
+            alert(t("save_excursion"));
+            window.location.href = "map.html";
+        } else {
+            const err = await res.json();
+            alert(err.detail || "Ошибка при сохранении");
+        }
+    }
+</script>
+</body>
+</html>

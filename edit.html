@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title data-i18n="edit_title">Редактировать экскурсию</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <style>
+    body { margin: 0; font-family: sans-serif; display: flex; height: 100vh; }
+    #sidebar { width: 35%; padding: 20px; overflow-y: auto; border-right: 1px solid #ccc; box-sizing: border-box; position: relative; }
+    #map { flex: 1; height: 100%; }
+    input, textarea { width: 100%; margin-bottom: 10px; }
+    .waypoint-form { border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; }
+    img.preview { max-width: 100px; margin-top: 5px; display: block; }
+    .leaflet-control-attribution { display: none !important; }
+    #langSelect {
+        position: absolute; top: 10px; right: 10px;
+    }
+  </style>
+</head>
+<body>
+<div id="sidebar">
+  <select id="langSelect">
+    <option value="ru">Русский</option>
+    <option value="en">English</option>
+  </select>
+
+  <h2 data-i18n="edit_excursion">Редактировать экскурсию</h2>
+  <label data-i18n="title_label">Название:</label>
+  <input type="text" id="title">
+  <label data-i18n="description_label">Описание:</label>
+  <textarea id="description"></textarea>
+  <label data-i18n="excursion_image">Изображение экскурсии:</label>
+  <input type="file" id="excursionImage">
+  <img id="currentImage" class="preview">
+
+  <h3 data-i18n="route_points">Точки маршрута</h3>
+  <div id="waypoints"></div>
+  <button onclick="submitForm()" data-i18n="save">Сохранить</button>
+  <button onclick="goBack()" data-i18n="back">Назад</button>
+</div>
+<div id="map"></div>
+
+<script>
+const token = localStorage.getItem("token");
+const map = L.map("map").setView([46.35, 48.04], 13);
+let excursionId = new URLSearchParams(location.search).get("id");
+const markers = [];
+let waypointForms = [];
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 18
+}).addTo(map);
+
+fetch(`http://localhost:8000/excursions/${excursionId}`, {
+  headers: { Authorization: "Bearer " + token }
+})
+.then(res => res.json())
+.then(data => {
+  document.getElementById("title").value = data.title;
+  document.getElementById("description").value = data.description || "";
+  if (data.image_url) {
+    document.getElementById("currentImage").src = "http://localhost:8000" + data.image_url;
+  }
+});
+
+fetch(`http://localhost:8000/excursions/${excursionId}/waypoints`)
+.then(res => res.json())
+.then(points => {
+  points.forEach((point, i) => {
+    const marker = L.marker([point.latitude, point.longitude]).addTo(map);
+    markers.push(marker);
+    addWaypointForm(point, i);
+  });
+});
+
+map.on("click", e => {
+  const latlng = e.latlng;
+  const marker = L.marker(latlng).addTo(map);
+  markers.push(marker);
+  addWaypointForm({ latitude: latlng.lat, longitude: latlng.lng }, markers.length - 1);
+});
+
+function addWaypointForm(data, index) {
+  const div = document.createElement("div");
+  div.className = "waypoint-form";
+  div.innerHTML = `
+    <label data-i18n="point_name">Название:</label>
+    <input name="name" value="${data.name || ''}">
+    <label data-i18n="point_desc">Описание:</label>
+    <textarea name="description">${data.description || ''}</textarea>
+    <label data-i18n="lat">Широта:</label>
+    <input name="latitude" type="number" step="any" value="${data.latitude}" readonly>
+    <label data-i18n="lng">Долгота:</label>
+    <input name="longitude" type="number" step="any" value="${data.longitude}" readonly>
+    ${data.image_url ? `<img src="http://localhost:8000${data.image_url}" class="preview">` : ""}
+    <label data-i18n="new_image">Новое изображение:</label>
+    <input name="image" type="file">
+    <button type="button" onclick="removeWaypoint(${index})" data-i18n="remove_point">Удалить</button>
+  `;
+  document.getElementById("waypoints").appendChild(div);
+  waypointForms.push(div);
+}
+
+function removeWaypoint(i) {
+  map.removeLayer(markers[i]);
+  waypointForms[i].remove();
+  markers[i] = null;
+  waypointForms[i] = null;
+}
+
+function goBack() {
+  window.location.href = "profile.html";
+}
+
+function submitForm() {
+  const formData = new FormData();
+  formData.append("title", document.getElementById("title").value);
+  formData.append("description", document.getElementById("description").value);
+  const excursionImage = document.getElementById("excursionImage").files[0];
+  if (excursionImage) formData.append("image", excursionImage);
+
+  const points = [];
+  waypointForms.forEach((form, i) => {
+    if (!form) return;
+    const point = {
+      name: form.querySelector("[name='name']").value,
+      description: form.querySelector("[name='description']").value,
+      latitude: parseFloat(form.querySelector("[name='latitude']").value),
+      longitude: parseFloat(form.querySelector("[name='longitude']").value),
+      order_index: i
+    };
+    points.push(point);
+    const image = form.querySelector("[name='image']").files[0];
+    if (image) formData.append("files", image);
+  });
+
+  formData.append("points", JSON.stringify(points));
+
+  fetch(`http://localhost:8000/excursions/${excursionId}/edit-full`, {
+    method: "POST",
+    headers: { Authorization: "Bearer " + token },
+    body: formData
+  }).then(res => {
+    if (res.ok) {
+      alert(t("updated"));
+      goBack();
+    } else {
+      res.json().then(d => alert(d.detail || "Ошибка"));
+    }
+  });
+}
+
+// i18n
+const translations = {
+  ru: {
+    "edit_title": "Редактировать экскурсию",
+    "edit_excursion": "Редактировать экскурсию",
+    "title_label": "Название:",
+    "description_label": "Описание:",
+    "excursion_image": "Изображение экскурсии:",
+    "route_points": "Точки маршрута",
+    "save": "Сохранить",
+    "back": "Назад",
+    "point_name": "Название:",
+    "point_desc": "Описание:",
+    "lat": "Широта:",
+    "lng": "Долгота:",
+    "new_image": "Новое изображение:",
+    "remove_point": "Удалить",
+    "updated": "Экскурсия обновлена"
+  },
+  en: {
+    "edit_title": "Edit Excursion",
+    "edit_excursion": "Edit Excursion",
+    "title_label": "Title:",
+    "description_label": "Description:",
+    "excursion_image": "Excursion image:",
+    "route_points": "Route points",
+    "save": "Save",
+    "back": "Back",
+    "point_name": "Name:",
+    "point_desc": "Description:",
+    "lat": "Latitude:",
+    "lng": "Longitude:",
+    "new_image": "New image:",
+    "remove_point": "Remove",
+    "updated": "Excursion updated"
+  }
+};
+
+function getLang() {
+  return localStorage.getItem("lang") || "ru";
+}
+
+function t(key) {
+  const lang = getLang();
+  return translations[lang][key] || key;
+}
+
+function applyTranslations() {
+  document.querySelectorAll("[data-i18n]").forEach(el => {
+    const key = el.getAttribute("data-i18n");
+    el.textContent = t(key);
+  });
+}
+
+const langSelect = document.getElementById("langSelect");
+langSelect.value = getLang();
+langSelect.addEventListener("change", () => {
+  localStorage.setItem("lang", langSelect.value);
+  location.reload();
+});
+applyTranslations();
+</script>
+</body>
+</html>

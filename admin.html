@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title data-i18n="adminTitle">Админ — модерация экскурсий</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 15px; }
+    th, td { border: 1px solid #ccc; padding: 8px; }
+    th { background: #f0f0f0; }
+    button { padding: 4px 10px; margin: 2px; }
+    #modal, #overlay {
+      display: none;
+      position: fixed;
+    }
+    #modal {
+      top: 10%; left: 10%; width: 80%;
+      background: white; border: 1px solid #ccc;
+      padding: 20px; max-height: 80%; overflow: auto;
+      box-shadow: 0 0 20px rgba(0,0,0,0.4);
+    }
+    #overlay {
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.5);
+    }
+    #langSwitch {
+      float: right;
+    }
+  </style>
+</head>
+<body>
+  <h2 data-i18n="moderation">Модерация экскурсий</h2>
+  <button onclick="logout()">🔒 <span data-i18n="logout">Выйти</span></button>
+  <select id="langSwitch">
+    <option value="ru">🇷🇺 Рус</option>
+    <option value="en">🇬🇧 Eng</option>
+  </select>
+
+  <table id="excursionTable">
+    <thead>
+      <tr>
+        <th data-i18n="created">Создано</th>
+        <th data-i18n="title">Название</th>
+        <th data-i18n="author">Автор</th>
+        <th data-i18n="status">Статус</th>
+        <th data-i18n="actions">Действия</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <div id="overlay" onclick="closeModal()"></div>
+  <div id="modal">
+    <h3 id="modalTitle"></h3>
+    <p id="modalDescription"></p>
+    <img id="modalImage" src="" alt="Изображение экскурсии" style="max-width:100%; margin-bottom:10px;" />
+    <ul id="modalWaypoints"></ul>
+    <button onclick="closeModal()" data-i18n="close">Закрыть</button>
+  </div>
+
+  <script>
+    const token = localStorage.getItem("token");
+    const tableBody = document.querySelector("#excursionTable tbody");
+
+    if (!token) {
+      alert("Вы не авторизованы.");
+      window.location.href = "login.html";
+    }
+
+    const translations = {
+      ru: {
+        adminTitle: "Админ — модерация экскурсий",
+        moderation: "Модерация экскурсий",
+        logout: "Выйти",
+        created: "Создано",
+        title: "Название",
+        author: "Автор",
+        status: "Статус",
+        actions: "Действия",
+        close: "Закрыть",
+        unknown: "Неизвестно"
+      },
+      en: {
+        adminTitle: "Admin — Excursion Moderation",
+        moderation: "Excursion Moderation",
+        logout: "Logout",
+        created: "Created",
+        title: "Title",
+        author: "Author",
+        status: "Status",
+        actions: "Actions",
+        close: "Close",
+        unknown: "Unknown"
+      }
+    };
+
+    function setLang(lang) {
+      document.querySelectorAll("[data-i18n]").forEach(el => {
+        const key = el.getAttribute("data-i18n");
+        el.textContent = translations[lang][key] || key;
+      });
+      document.documentElement.lang = lang;
+      localStorage.setItem("lang", lang);
+    }
+
+    const savedLang = localStorage.getItem("lang") || "ru";
+    setLang(savedLang);
+    document.getElementById("langSwitch").value = savedLang;
+    document.getElementById("langSwitch").addEventListener("change", e => {
+      setLang(e.target.value);
+    });
+
+    function logout() {
+      localStorage.removeItem("token");
+      window.location.href = "login.html";
+    }
+
+    function loadExcursions() {
+      tableBody.innerHTML = "";
+
+      fetch("http://localhost:8000/admin/excursions", {
+        headers: { Authorization: "Bearer " + token }
+      })
+      .then(res => {
+        if (res.status === 403) {
+          alert("Доступ запрещён");
+          window.location.href = "map.html";
+          return [];
+        }
+        return res.json();
+      })
+      .then(excursions => {
+        excursions.forEach(e => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${new Date(e.created_at).toLocaleString()}</td>
+            <td>${e.title}</td>
+            <td>${e.author?.full_name || translations[savedLang].unknown}</td>
+            <td>${e.status}</td>
+            <td>
+              <button onclick="approve(${e.id})">✔</button>
+              <button onclick="reject(${e.id})">✖</button>
+              <button onclick="showDetails(${e.id}, '${e.title.replace(/'/g, "\\'")}', \`${(e.description || "").replace(/`/g, "\\`")}\`)">📄</button>
+            </td>
+          `;
+          tableBody.appendChild(tr);
+        });
+      });
+    }
+
+    function approve(id) {
+      fetch(`http://localhost:8000/admin/excursions/${id}/approve`, {
+        method: "POST",
+        headers: { Authorization: "Bearer " + token }
+      }).then(loadExcursions);
+    }
+
+    function reject(id) {
+      fetch(`http://localhost:8000/admin/excursions/${id}/reject`, {
+        method: "POST",
+        headers: { Authorization: "Bearer " + token }
+      }).then(loadExcursions);
+    }
+
+    function showDetails(id, title, description) {
+      document.getElementById("modalTitle").textContent = `Экскурсия: ${title}`;
+      document.getElementById("modalDescription").textContent = description;
+
+      const image = document.getElementById("modalImage");
+      image.style.display = "none";
+
+      fetch("http://localhost:8000/admin/excursions", {
+        headers: { Authorization: "Bearer " + token }
+      })
+      .then(res => res.json())
+      .then(all => {
+        const excursion = all.find(e => e.id === id);
+        if (excursion && excursion.image_url) {
+          image.src = `http://localhost:8000${excursion.image_url}`;
+          image.style.display = "block";
+        }
+      });
+
+      const ul = document.getElementById("modalWaypoints");
+      ul.innerHTML = "Загрузка точек...";
+
+      fetch(`http://localhost:8000/excursions/${id}/waypoints`)
+      .then(res => res.json())
+      .then(waypoints => {
+        ul.innerHTML = "";
+        waypoints.forEach(w => {
+          const li = document.createElement("li");
+          const img = w.image_url ? `<br><img src="http://localhost:8000${w.image_url}" width="150">` : "";
+          li.innerHTML = `<b>${w.name}</b>: ${w.description || ""} (${w.latitude}, ${w.longitude})${img}`;
+          ul.appendChild(li);
+        });
+      });
+
+      document.getElementById("overlay").style.display = "block";
+      document.getElementById("modal").style.display = "block";
+    }
+
+    function closeModal() {
+      document.getElementById("modal").style.display = "none";
+      document.getElementById("overlay").style.display = "none";
+    }
+
+    loadExcursions();
+  </script>
+</body>
+</html>

@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title data-i18n="selectExcursion">Выбор экскурсии</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.css" />
+    <script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.min.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 10px; }
+        #map { height: 65vh; width: 70%; margin: 10px auto 0; }
+        #excursionDescription { margin-top: 10px; }
+        #routeFromMeBtn { margin-top: 5px; padding: 5px 10px; }
+        nav { background: #0077cc; text-align: center; padding: 10px; }
+        nav a { color: white; text-decoration: none; margin: 0 15px; font-size: 16px; }
+        .leaflet-control-attribution { display: none !important; }
+        #coverAttribution { position: absolute; bottom: 0; right: 0; width: 70px; height: 20px; background: white; z-index: 1000; }
+        #searchInput { width: 70%; padding: 8px; margin-bottom: 10px; }
+        #suggestions { list-style: none; padding: 0; margin: 0; max-height: 150px; overflow-y: auto; background: white; border: 1px solid #ccc; width: 70%; display: none; position: absolute; z-index: 1000; }
+        #suggestions li { padding: 8px; cursor: pointer; }
+        #suggestions li:hover { background: #f0f0f0; }
+    </style>
+</head>
+<body>
+<nav>
+    <a href="create.html" data-i18n="create">Создать экскурсию</a>
+    <a href="#" onclick="goToProfile()" data-i18n="profile">Профиль</a>
+    <a href="#" onclick="logout()" data-i18n="logout">Выйти</a>
+    <select id="langSwitcher">
+        <option value="ru">Русский</option>
+        <option value="en">English</option>
+    </select>
+</nav>
+
+<h2 data-i18n="selectExcursion">Выберите экскурсию</h2>
+<input type="text" id="searchInput" data-i18n-placeholder="searchPlaceholder" placeholder="Поиск по названию...">
+<ul id="suggestions"></ul>
+
+<p id="excursionDescription"></p>
+<img id="excursionImage" src="" alt="Картинка экскурсии" style="max-width: 400px; display: none; margin-top: 10px;">
+<button id="routeFromMeBtn" style="display: none;" data-i18n="routeBtn">Построить маршрут от моего местоположения</button>
+
+<div id="map"></div>
+<hr>
+<div id="reviewSection" style="display:none;">
+    <h3 data-i18n="leaveReview">Оставить отзыв</h3>
+    <label for="rating" data-i18n="rating">Оценка (1–5):</label>
+    <input type="number" id="rating" min="1" max="5"><br>
+    <textarea id="comment" data-i18n-placeholder="reviewPlaceholder" placeholder="Комментарий..." rows="3" cols="40"></textarea><br>
+    <button onclick="submitReview()" data-i18n="reviewSubmit">Оставить отзыв</button>
+
+    <h3 data-i18n="reviews">Отзывы</h3>
+    <div id="reviewList">Загрузка отзывов...</div>
+</div>
+
+<script>
+const translations = {
+    ru: {
+        selectExcursion: "Выберите экскурсию",
+        logout: "Выйти",
+        profile: "Профиль",
+        create: "Создать экскурсию",
+        searchPlaceholder: "Поиск по названию...",
+        reviewPlaceholder: "Комментарий...",
+        reviewSubmit: "Оставить отзыв",
+        reviews: "Отзывы",
+        leaveReview: "Оставить отзыв",
+        rating: "Оценка (1–5):",
+        routeBtn: "Построить маршрут от моего местоположения"
+    },
+    en: {
+        selectExcursion: "Select an excursion",
+        logout: "Logout",
+        profile: "Profile",
+        create: "Create excursion",
+        searchPlaceholder: "Search by title...",
+        reviewPlaceholder: "Comment...",
+        reviewSubmit: "Submit review",
+        reviews: "Reviews",
+        leaveReview: "Leave a review",
+        rating: "Rating (1–5):",
+        routeBtn: "Build route from my location"
+    }
+};
+
+function applyTranslations(lang) {
+    const dict = translations[lang];
+
+    document.querySelectorAll("[data-i18n]").forEach(el => {
+        const key = el.getAttribute("data-i18n");
+        if (dict[key]) el.textContent = dict[key];
+    });
+
+    document.querySelectorAll("[data-i18n-placeholder]").forEach(el => {
+        const key = el.getAttribute("data-i18n-placeholder");
+        if (dict[key]) el.placeholder = dict[key];
+    });
+}
+
+const savedLang = localStorage.getItem("lang") || "ru";
+applyTranslations(savedLang);
+document.getElementById("langSwitcher").value = savedLang;
+document.getElementById("langSwitcher").addEventListener("change", e => {
+    const lang = e.target.value;
+    localStorage.setItem("lang", lang);
+    applyTranslations(lang);
+});
+</script>
+
+<script>
+    let allExcursions = [];
+    let currentExcursion = null;
+    const searchInput = document.getElementById("searchInput");
+    const suggestions = document.getElementById("suggestions");
+    const excursionDescription = document.getElementById("excursionDescription");
+    const routeFromMeBtn = document.getElementById("routeFromMeBtn");
+    const reviewSection = document.getElementById("reviewSection");
+    const reviewList = document.getElementById("reviewList");
+
+    const map = L.map('map').setView([46.3497, 48.0408], 13);
+    let polyline;
+    let userMarker;
+    let currentExcursionWaypoints = [];
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 18,
+    }).addTo(map);
+
+    fetch("http://localhost:8000/excursions/all")
+        .then(res => res.json())
+        .then(excursions => {
+            allExcursions = excursions;
+        });
+
+    searchInput.addEventListener("input", () => {
+        const term = searchInput.value.toLowerCase();
+        const filtered = allExcursions.filter(e => e.title.toLowerCase().includes(term));
+        renderSuggestions(filtered);
+    });
+
+    searchInput.addEventListener("focus", () => {
+        renderSuggestions(allExcursions);
+    });
+
+    function renderSuggestions(list) {
+        suggestions.innerHTML = "";
+        list.forEach(exc => {
+            const li = document.createElement("li");
+            const ratingText = exc.average_rating ? ` ★${exc.average_rating}` : '';
+            li.textContent = `${exc.title}${ratingText}`;
+            li.addEventListener("click", () => {
+                searchInput.value = exc.title;
+                suggestions.style.display = "none";
+                loadExcursion(exc);
+            });
+            suggestions.appendChild(li);
+        });
+        suggestions.style.display = "block";
+    }
+
+    function loadExcursion(exc) {
+        currentExcursion = exc;
+        excursionDescription.textContent = exc.description || "";
+        routeFromMeBtn.style.display = "inline-block";
+        reviewSection.style.display = "block";
+        loadReviews(exc.id);
+        const imageElem = document.getElementById("excursionImage");
+        if (exc.image_url) {
+            imageElem.src = "http://localhost:8000" + exc.image_url;
+            imageElem.style.display = "block";
+        } else {
+            imageElem.style.display = "none";
+        }
+
+
+        fetch(`http://localhost:8000/excursions/${exc.id}/waypoints`)
+            .then(res => res.json())
+            .then(waypoints => {
+                currentExcursionWaypoints = waypoints;
+                if (!waypoints.length) return;
+
+                map.eachLayer(layer => {
+                    if (layer instanceof L.Marker || layer instanceof L.Polyline) {
+                        map.removeLayer(layer);
+                    }
+                });
+
+                const latlngs = [];
+
+                waypoints.forEach(point => {
+                    const { latitude, longitude, name, description, image_url } = point;
+                    latlngs.push([latitude, longitude]);
+
+                    const popup = `
+                        <b>${name}</b><br>
+                        ${description || ""}<br>
+                        ${image_url ? `<img src="http://localhost:8000${image_url}" width="100">` : ""}
+                    `;
+
+                    L.marker([latitude, longitude])
+                        .addTo(map)
+                        .bindPopup(popup);
+                });
+
+                map.setView(latlngs[0], 14);
+                polyline = L.polyline(latlngs, { color: 'blue' }).addTo(map);
+            });
+    }
+
+    routeFromMeBtn.addEventListener("click", () => {
+        if (!currentExcursionWaypoints.length) return;
+
+        navigator.geolocation.getCurrentPosition(position => {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+
+            if (userMarker) map.removeLayer(userMarker);
+            userMarker = L.marker([lat, lng], { title: "Вы здесь" }).addTo(map);
+
+            const latlngs = [[lat, lng], ...currentExcursionWaypoints.map(w => [w.latitude, w.longitude])];
+            if (window.routingControl) {
+                map.removeControl(window.routingControl);
+            }
+
+            window.routingControl = L.Routing.control({
+                waypoints: latlngs.map(([lat, lng]) => L.latLng(lat, lng)),
+                routeWhileDragging: false,
+                createMarker: () => null
+            }).addTo(map);
+
+            map.setView([lat, lng], 14);
+        }, () => {
+            alert("Не удалось получить местоположение");
+        });
+    });
+
+    function logout() {
+        localStorage.removeItem("token");
+        location.href = "login.html";
+    }
+
+    function goToProfile() {
+        location.href = "profile.html";
+    }
+
+    function loadReviews(excursionId) {
+        fetch(`http://localhost:8000/excursions/${excursionId}/reviews`)
+            .then(res => res.json())
+            .then(reviews => {
+                if (!reviews.length) {
+                    reviewList.innerHTML = "<p>Отзывов пока нет.</p>";
+                    return;
+                }
+                reviewList.innerHTML = "";
+                reviews.forEach(r => {
+                    const div = document.createElement("div");
+                    div.innerHTML = `<b>${r.user_full_name || "Аноним"}:</b><br>Оценка: ${r.rating} <br>Комментарий: ${r.comment || "—"}<hr>`;
+                    reviewList.appendChild(div);
+                });
+            });
+    }
+
+    function submitReview() {
+        const rating = document.getElementById("rating").value;
+        const comment = document.getElementById("comment").value;
+        const token = localStorage.getItem("token");
+
+        if (!rating || rating < 1 || rating > 5) {
+            alert("Оценка должна быть от 1 до 5");
+            return;
+        }
+
+        fetch(`http://localhost:8000/excursions/${currentExcursion.id}/review`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: "Bearer " + token
+            },
+            body: JSON.stringify({ rating: Number(rating), comment })
+        })
+        .then(res => {
+            if (res.ok) {
+                alert("Отзыв отправлен!");
+                document.getElementById("rating").value = "";
+                document.getElementById("comment").value = "";
+                loadReviews(currentExcursion.id);
+            } else {
+                res.json().then(d => alert(d.detail || "Ошибка"));
+            }
+        });
+    }
+</script>
+</body>
+</html>
